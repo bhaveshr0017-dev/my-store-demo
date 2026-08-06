@@ -7,7 +7,7 @@ import {
   CS_FETCH_GRAPHQL,
   fetchPlaceholders,
   getOptionsUIDsFromUrl,
-  getProductSku,
+  resolveProductSku,
   IS_UE,
   loadErrorPage,
   preloadFile,
@@ -79,8 +79,8 @@ await initializeDropin(async () => {
   // Preload PDP assets immediately when this module is imported
   preloadPDPAssets();
 
-  // Fetch product data
-  const sku = getProductSku();
+  // Fetch product data — resolve real Commerce SKU (URL may be sanitized)
+  const sku = await resolveProductSku();
   const optionsUIDs = getOptionsUIDsFromUrl();
 
   // If we cannot find a sku, and we are not in UE, there's a problem.
@@ -92,6 +92,10 @@ await initializeDropin(async () => {
     fetchProductData(sku, { optionsUIDs, skipTransform: true }).then(preloadImageMiddleware),
     fetchPlaceholders('placeholders/pdp.json'),
   ]);
+
+  if (!product?.sku && !IS_UE) {
+    return loadErrorPage();
+  }
 
   const langDefinitions = {
     default: {
