@@ -633,6 +633,72 @@ function getSkuFromUrl() {
 }
 
 /**
+ * Extracts the product urlKey from the current URL path.
+ * @returns {string|null} The urlKey extracted from the URL, or null if not found
+ */
+function getUrlKeyFromUrl() {
+  const path = window.location.pathname;
+  const result = path.match(/\/products\/([\w|-]+)\/[\w|-]+$/);
+  return result?.[1];
+}
+
+/**
+ * Resolves the Commerce SKU for the current PDP.
+ * URL SKUs are sanitized (lowercase, spaces → hyphens) for EDS routes, so they may
+ * not match Catalog Service. Falls back to lookup by url_key when needed.
+ * Prefer bulk metadata `sku` when published (Adobe recommended for casing/spaces).
+ * @returns {Promise<string|null>}
+ */
+export async function resolveProductSku() {
+  if (isProductTemplate() && (IS_UE || IS_DA)) {
+    return getDefaultSkuFromBlock();
+  }
+
+  const metaSku = getMetadata('sku');
+  if (metaSku) return metaSku;
+
+  const urlSku = getSkuFromUrl();
+  if (!urlSku) return null;
+
+  try {
+    const { data } = await CS_FETCH_GRAPHQL.fetchGraphQl(`
+      query resolveSkuByUrlSku($skus: [String!]) {
+        products(skus: $skus) { sku }
+      }
+    `, { variables: { skus: [urlSku] } });
+
+    if (data?.products?.[0]?.sku) {
+      return data.products[0].sku;
+    }
+
+    const urlKey = getUrlKeyFromUrl();
+    if (!urlKey) return urlSku;
+
+    const { data: searchData, errors } = await CS_FETCH_GRAPHQL.fetchGraphQl(`
+      query resolveSkuByUrlKey($urlKey: String!) {
+        productSearch(
+          phrase: ""
+          page_size: 1
+          filter: [{ attribute: "url_key", eq: $urlKey }]
+        ) {
+          items { productView { sku } }
+        }
+      }
+    `, { variables: { urlKey } });
+
+    if (errors?.length) {
+      console.error('Failed to resolve product SKU by url_key', errors);
+      return urlSku;
+    }
+
+    return searchData?.productSearch?.items?.[0]?.productView?.sku || urlSku;
+  } catch (error) {
+    console.error('Failed to resolve product SKU', error);
+    return urlSku;
+  }
+}
+
+/**
  * Extracts the defaultSku property from the product-details block element.
  * @returns {string|null} The defaultSku value from the block, or null if not found
  */
